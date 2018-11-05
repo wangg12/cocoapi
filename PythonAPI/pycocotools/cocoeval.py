@@ -6,6 +6,7 @@ import time
 from collections import defaultdict
 from . import mask as maskUtils
 import copy
+import ext
 
 class COCOeval:
     # Interface for evaluating detection on the Microsoft COCO dataset.
@@ -57,7 +58,7 @@ class COCOeval:
     # Data, paper, and tutorials available at:  http://mscoco.org/
     # Code written by Piotr Dollar and Tsung-Yi Lin, 2015.
     # Licensed under the Simplified BSD License [see coco/license.txt]
-    def __init__(self, cocoGt=None, cocoDt=None, iouType='segm'):
+    def __init__(self, cocoGt=None, cocoDt=None, iouType='segm', use_ext=True):
         '''
         Initialize CocoEval using coco APIs for gt and dt
         :param cocoGt: coco object with ground truth annotations
@@ -77,6 +78,7 @@ class COCOeval:
         self._paramsEval = {}               # parameters for evaluation
         self.stats = []                     # result summarization
         self.ious = {}                      # ious between all gts and dts
+        self.use_ext = use_ext              # use c++ extension
         if not cocoGt is None:
             self.params.imgIds = sorted(cocoGt.getImgIds())
             self.params.catIds = sorted(cocoGt.getCatIds())
@@ -112,10 +114,14 @@ class COCOeval:
                 gt['ignore'] = (gt['num_keypoints'] == 0) or gt['ignore']
         self._gts = defaultdict(list)       # gt for evaluation
         self._dts = defaultdict(list)       # dt for evaluation
-        for gt in gts:
-            self._gts[gt['image_id'], gt['category_id']].append(gt)
-        for dt in dts:
-            self._dts[dt['image_id'], dt['category_id']].append(dt)
+        if not self.use_ext:
+            for gt in gts:
+                self._gts[gt['image_id'], gt['category_id']].append(gt)
+            for dt in dts:
+                self._dts[dt['image_id'], dt['category_id']].append(dt)
+        else:
+            ext.cpp_prepare(gts,dts,p.iouType)
+
         self.evalImgs = defaultdict(list)   # per-image per-category evaluation results
         self.eval     = {}                  # accumulated evaluation results
 
@@ -146,17 +152,23 @@ class COCOeval:
             computeIoU = self.computeIoU
         elif p.iouType == 'keypoints':
             computeIoU = self.computeOks
-        self.ious = {(imgId, catId): computeIoU(imgId, catId) \
-                        for imgId in p.imgIds
-                        for catId in catIds}
+        if not self.use_ext:# or p.iouType == 'segm':
+            self.ious = {(imgId, catId): computeIoU(imgId, catId) \
+                            for imgId in p.imgIds
+                            for catId in catIds}
+        else:
+            self.ious = ext.cpp_compute_iou(p.imgIds,catIds,self._gts,self._dts,p.iouType,p.maxDets[-1],p.useCats)
 
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
-        self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet)
-                 for catId in catIds
-                 for areaRng in p.areaRng
-                 for imgId in p.imgIds
-             ]
+        if not self.use_ext:
+            self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet)
+                     for catId in catIds
+                     for areaRng in p.areaRng
+                     for imgId in p.imgIds
+                 ]
+        else:
+            ext.cpp_evaluate_img(p.useCats,maxDet,catIds,p.areaRng,p.imgIds,self._gts,self._dts,self.ious,p.iouThrs)
         self._paramsEval = copy.deepcopy(self.params)
         toc = time.time()
         print('DONE (t={:0.2f}s).'.format(toc-tic))
@@ -321,8 +333,8 @@ class COCOeval:
         '''
         print('Accumulating evaluation results...')
         tic = time.time()
-        if not self.evalImgs:
-            print('Please run evaluate() first')
+        #if not self.evalImgs:
+        #    print('Please run evaluate() first')
         # allows input customized parameters
         if p is None:
             p = self.params
@@ -350,6 +362,19 @@ class COCOeval:
         i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
         I0 = len(_pe.imgIds)
         A0 = len(_pe.areaRng)
+        if self.use_ext:
+            precision,recall,scores=ext.cpp_accumulate(T,R,K,A,M,I0,A0,k_list,a_list,m_list,i_list,p.recThrs)
+            self.eval = {
+                'params': p,
+                'counts': [T, R, K, A, M],
+                'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'precision': precision,
+                'recall':   recall,
+                'scores': scores,
+            }
+            toc = time.time()
+            print('DONE (t={:0.2f}s).'.format( toc-tic))
+            return
         # retrieve E at each category, area range, and max number of detections
         for k, k0 in enumerate(k_list):
             Nk = k0*A0*I0
