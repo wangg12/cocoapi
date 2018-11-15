@@ -441,6 +441,8 @@ class COCOeval:
                 # IoU
                 if iouThr is not None:
                     t = np.where(iouThr == p.iouThrs)[0]
+                    if iouThr == .9:
+                        t = [8]
                     s = s[t]
                 s = s[:,:,:,aind,mind]
             else:
@@ -457,7 +459,7 @@ class COCOeval:
             print(iStr.format(titleStr, typeStr, iouStr, areaRng, maxDets, mean_s))
             return mean_s
         def _summarizeDets():
-            stats = np.zeros((12,))
+            stats = np.zeros((18,))
             stats[0] = _summarize(1)
             stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
             stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
@@ -470,6 +472,12 @@ class COCOeval:
             stats[9] = _summarize(0, areaRng='small', maxDets=self.params.maxDets[2])
             stats[10] = _summarize(0, areaRng='medium', maxDets=self.params.maxDets[2])
             stats[11] = _summarize(0, areaRng='large', maxDets=self.params.maxDets[2])
+            stats[12] = _summarize(1, iouThr=.6, maxDets=self.params.maxDets[2])
+            stats[13] = _summarize(1, iouThr=.7, maxDets=self.params.maxDets[2])
+            stats[14] = _summarize(1, iouThr=.8, maxDets=self.params.maxDets[2])
+            stats[15] = _summarize(1, iouThr=.85, maxDets=self.params.maxDets[2])
+            stats[16] = _summarize(1, iouThr=.9, maxDets=self.params.maxDets[2])
+            stats[16] = _summarize(1, iouThr=.95, maxDets=self.params.maxDets[2])
             return stats
         def _summarizeKps():
             stats = np.zeros((10,))
