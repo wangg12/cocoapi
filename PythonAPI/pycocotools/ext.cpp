@@ -540,7 +540,7 @@ cpp_compute_iou(std::vector<int> imgIds,
       for (size_t i = 0; i < G; i++) {
         iscrowd[i] = gtsm->iscrowd[i];
       }
-      int m = D;
+      int m = std::min(D,(size_t)maxDet);
       int n = G;
       if(m==0 || n==0) {
         list[k] = py::array_t<double>();
@@ -576,7 +576,7 @@ cpp_compute_iou(std::vector<int> imgIds,
       for (size_t i = 0; i < G; i++) {
         iscrowd[i] = gtsm->iscrowd[i];
       }
-      int m = D;
+      int m = std::min(D,(size_t)maxDet);
       int n = G;
       if(m==0 || n==0) {
         list[k] = py::array_t<double>();
