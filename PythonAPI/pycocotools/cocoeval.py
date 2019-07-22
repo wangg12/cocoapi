@@ -6,6 +6,7 @@ import time
 from collections import defaultdict
 from . import mask as maskUtils
 import copy
+import ext
 
 class COCOeval:
     # Interface for evaluating detection on the Microsoft COCO dataset.
@@ -57,7 +58,7 @@ class COCOeval:
     # Data, paper, and tutorials available at:  http://mscoco.org/
     # Code written by Piotr Dollar and Tsung-Yi Lin, 2015.
     # Licensed under the Simplified BSD License [see coco/license.txt]
-    def __init__(self, cocoGt=None, cocoDt=None, iouType='segm'):
+    def __init__(self, cocoGt=None, cocoDt=None, iouType='segm', use_ext=False, num_threads=1):
         '''
         Initialize CocoEval using coco APIs for gt and dt
         :param cocoGt: coco object with ground truth annotations
@@ -77,6 +78,8 @@ class COCOeval:
         self._paramsEval = {}               # parameters for evaluation
         self.stats = []                     # result summarization
         self.ious = {}                      # ious between all gts and dts
+        self.use_ext = use_ext              # use c++ extension
+        self.num_threads = num_threads      # number of OpenMP threads
         if not cocoGt is None:
             self.params.imgIds = sorted(cocoGt.getImgIds())
             self.params.catIds = sorted(cocoGt.getCatIds())
@@ -132,12 +135,18 @@ class COCOeval:
             p.iouType = 'segm' if p.useSegm == 1 else 'bbox'
             print('useSegm (deprecated) is not None. Running {} evaluation'.format(p.iouType))
         print('Evaluate annotation type *{}*'.format(p.iouType))
+
         p.imgIds = list(np.unique(p.imgIds))
         if p.useCats:
             p.catIds = list(np.unique(p.catIds))
         p.maxDets = sorted(p.maxDets)
         self.params=p
 
+        if self.use_ext:
+            p.imgIds,p.catIds,self.eval = ext.cpp_evaluate(p.useCats,p.areaRng,p.iouThrs,p.maxDets,p.recThrs,p.iouType,self.num_threads)
+            toc = time.time()
+            print('DONE (t={:0.2f}s).'.format(toc-tic))
+            return
         self._prepare()
         # loop through images, area range, max detection number
         catIds = p.catIds if p.useCats else [-1]
@@ -321,9 +330,13 @@ class COCOeval:
         '''
         print('Accumulating evaluation results...')
         tic = time.time()
-        if not self.evalImgs:
-            print('Please run evaluate() first')
+        #if not self.evalImgs:
+        #    print('Please run evaluate() first')
         # allows input customized parameters
+        if self.use_ext:
+            toc = time.time()
+            print('DONE (t={:0.2f}s).'.format( toc-tic))
+            return
         if p is None:
             p = self.params
         p.catIds = p.catIds if p.useCats == 1 else [-1]
@@ -335,7 +348,6 @@ class COCOeval:
         precision   = -np.ones((T,R,K,A,M)) # -1 for the precision of absent categories
         recall      = -np.ones((T,K,A,M))
         scores      = -np.ones((T,R,K,A,M))
-
         # create dictionary for future indexing
         _pe = self._paramsEval
         catIds = _pe.catIds if _pe.useCats else [-1]
@@ -427,7 +439,7 @@ class COCOeval:
         '''
         def _summarize( ap=1, iouThr=None, areaRng='all', maxDets=100 ):
             p = self.params
-            iStr = ' {:<18} {} @[ IoU={:<9} | area={:>6s} | maxDets={:>3d} ] = {:0.3f}'
+            iStr = ' {:<18} {} @[ IoU={:<9} | area={:>6s} | maxDets={:>3d} ] = {:0.5f}'
             titleStr = 'Average Precision' if ap == 1 else 'Average Recall'
             typeStr = '(AP)' if ap==1 else '(AR)'
             iouStr = '{:0.2f}:{:0.2f}'.format(p.iouThrs[0], p.iouThrs[-1]) \
